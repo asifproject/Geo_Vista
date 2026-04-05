@@ -4,11 +4,11 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY streamlit-prettymapp /app/streamlit-prettymapp/
+COPY streamlit-geovista /app/streamlit-geovista/
 
 WORKDIR /app
 
-RUN pip3 install -r streamlit-prettymapp/requirements.txt
+RUN pip3 install -r streamlit-geovista/requirements.txt
 
 EXPOSE 8501
 
