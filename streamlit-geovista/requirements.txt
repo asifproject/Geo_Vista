@@ -3,3 +3,10 @@ streamlit==1.52.2
 streamlit-image-select==0.6.0
 pyogrio
 prettymapp
+geopy
+osmnx
+networkx
+shapely
+pyproj
+pandas
+matplotlib
