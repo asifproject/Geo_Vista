@@ -1,0 +1,211 @@
+import copy
+import json
+import time
+from pathlib import Path
+
+import streamlit as st
+from streamlit_image_select import image_select
+
+from utils import (
+    st_get_osm_geometries,
+    st_plot_all,
+    get_colors_from_style,
+    plt_to_svg,
+    slugify,
+)
+from prettymapp.geo import GeoCodingError, get_aoi
+from prettymapp.settings import STYLES
+
+
+# =====================================================
+# SESSION STATE INITIALIZATION
+# =====================================================
+if "page" not in st.session_state:
+    st.session_state.page = "loading"
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if "users" not in st.session_state:
+    st.session_state.users = {"admin": "1234"}  # default demo user
+
+
+# =====================================================
+# LOADING PAGE
+# =====================================================
+def loading_page():
+    st.set_page_config(page_title="Prettymapp", layout="centered")
+
+    st.markdown(
+        "<h1 style='text-align:center;'>🖼️ Prettymapp</h1>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<h3 style='text-align:center;'>Loading Application...</h3>",
+        unsafe_allow_html=True,
+    )
+
+    with st.spinner("Please wait..."):
+        time.sleep(8)
+
+    st.session_state.page = "login"
+    st.rerun()
+
+
+# =====================================================
+# LOGIN PAGE
+# =====================================================
+def login_page():
+    st.set_page_config(page_title="Login", layout="centered")
+    st.title("Login")
+
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Login"):
+            if username in st.session_state.users and \
+               st.session_state.users[username] == password:
+                st.session_state.authenticated = True
+                st.session_state.page = "main"
+                st.rerun()
+            else:
+                st.error("Invalid username or password")
+
+    with col2:
+        if st.button("Sign Up"):
+            st.session_state.page = "signup"
+            st.rerun()
+
+
+# =====================================================
+# SIGNUP PAGE
+# =====================================================
+def signup_page():
+    st.set_page_config(page_title="Sign Up", layout="centered")
+    st.title("Create Account")
+
+    new_user = st.text_input("Choose Username")
+    new_pass = st.text_input("Choose Password", type="password")
+
+    if st.button("Register"):
+        if new_user in st.session_state.users:
+            st.error("Username already exists")
+        elif new_user == "" or new_pass == "":
+            st.error("Fields cannot be empty")
+        else:
+            st.session_state.users[new_user] = new_pass
+            st.success("Account created successfully! Please login.")
+            st.session_state.page = "login"
+            st.rerun()
+
+    if st.button("Back to Login"):
+        st.session_state.page = "login"
+        st.rerun()
+
+
+# =====================================================
+# MAIN APPLICATION (YOUR ORIGINAL CODE)
+# =====================================================
+def main_app():
+    st.set_page_config(
+        page_title="prettymapp",
+        page_icon="🖼️",
+        initial_sidebar_state="collapsed",
+    )
+
+    st.markdown("# Prettymapp")
+
+    if st.button("Logout"):
+        st.session_state.authenticated = False
+        st.session_state.page = "login"
+        st.rerun()
+
+    _HERE = Path(__file__).resolve().parent
+    with (_HERE / "examples.json").open("r", encoding="utf8") as f:
+        EXAMPLES = json.load(f)
+
+    if "previous_style" not in st.session_state:
+        st.session_state.update(EXAMPLES["Macau"])
+        lc_class_colors = get_colors_from_style("Peach")
+        st.session_state.lc_classes = list(lc_class_colors.keys())
+        st.session_state.update(lc_class_colors)
+        st.session_state["previous_style"] = "Peach"
+        st.session_state["previous_example_index"] = 0
+
+    example_image_pattern = str(_HERE / "example_prints" / "{}_small.png")
+    example_image_fp = [
+        example_image_pattern.format(name.lower())
+        for name in list(EXAMPLES.keys())[:4]
+    ]
+
+    index_selected = image_select(
+        "",
+        images=example_image_fp,
+        captions=list(EXAMPLES.keys())[:4],
+        index=0,
+        return_value="index",
+    )
+
+    if index_selected != st.session_state["previous_example_index"]:
+        name_selected = list(EXAMPLES.keys())[index_selected]
+        st.session_state.update(EXAMPLES[name_selected].copy())
+        st.session_state["previous_example_index"] = index_selected
+
+    form = st.form(key="form_settings")
+    col1, col2, col3 = form.columns([3, 1, 1])
+
+    address = col1.text_input("Location address", key="address")
+    radius = col2.slider("Radius (meter)", 100, 1500, key="radius")
+
+    style = col3.selectbox(
+        "Color theme",
+        options=list(STYLES.keys()),
+        key="style",
+    )
+
+    if style != st.session_state["previous_style"]:
+        st.session_state.update(get_colors_from_style(style))
+
+    draw_settings = copy.deepcopy(STYLES[style])
+
+    for lc_class in st.session_state.lc_classes:
+        picked_color = col3.color_picker(lc_class, key=lc_class)
+        draw_settings[lc_class]["fc"] = picked_color
+
+    form.form_submit_button(label="Submit")
+
+    with st.spinner("Creating map... (may take up to a minute)"):
+        try:
+            aoi = get_aoi(address=address, radius=radius)
+        except GeoCodingError as e:
+            st.error(f"ERROR: {str(e)}")
+            st.stop()
+
+        df = st_get_osm_geometries(aoi=aoi)
+        fig = st_plot_all(_df=df, draw_settings=draw_settings)
+        st.pyplot(fig, dpi=300)
+
+    st.session_state["previous_style"] = style
+
+
+# =====================================================
+# PAGE ROUTER
+# =====================================================
+if st.session_state.page == "loading":
+    loading_page()
+
+elif st.session_state.page == "login":
+    login_page()
+
+elif st.session_state.page == "signup":
+    signup_page()
+
+elif st.session_state.page == "main":
+    if st.session_state.authenticated:
+        main_app()
+    else:
+        st.session_state.page = "login"
+        st.rerun()
